@@ -59,6 +59,33 @@ class VectorQuantization(Function):
 class VectorQuantizationStraightThrough(Function):
     @staticmethod
     def forward(ctx, inputs, codebook):
+        '''
+        Call vq:
+        The regular vector quantization returns indices of shape [2, 3, 3]
+        Each index (0-7) points to one of the 8 codebook vectors
+        Flatten indices:
+
+        indices_flatten shape: [18]
+        Example: [2, 5, 1, 0, 3, 7, 4, 6, 2, 1, 0, 4, 7, 5, 3, 2, 6, 1]
+        Save tensors and mark non-differentiable:
+
+        This saves data for the backward pass
+        Marks that indices don't have gradients
+        Retrieve codebook vectors:
+
+        torch.index_select(codebook, dim=0, index=indices_flatten)
+        Gets the actual embedding vectors for each index
+        If codebook[2] = [0.1, -0.2, 0.3, 0.4], then the first vector in our result is this value
+        Reshape codes:
+
+        Reshapes back to original input shape [2, 3, 3, 4]
+        Now containing the actual codebook vectors instead of original input features
+        
+        Return:
+        codes: quantized vectors [2, 3, 3, 4]
+        indices_flatten: flattened indices [18]
+
+        '''
         indices = vq(inputs, codebook)
         indices_flatten = indices.view(-1)
         ctx.save_for_backward(indices_flatten, codebook)
@@ -74,17 +101,48 @@ class VectorQuantizationStraightThrough(Function):
     def backward(ctx, grad_output, grad_indices):
         grad_inputs, grad_codebook = None, None
 
+        # encoder learning
+        # when training, input need gradient
+        # when eval, input don't need gradient, skip this
         if ctx.needs_input_grad[0]:
             # Straight-through estimator
             grad_inputs = grad_output.clone()
+            
+        # codebook learning
         if ctx.needs_input_grad[1]:
             # Gradient wrt. the codebook
-            indices, codebook = ctx.saved_tensors
-            embedding_size = codebook.size(1)
+            # from: ctx.save_for_backward(indices_flatten, codebook)
+            '''
+            indices is a flattened tensor of shape [18] (2×3×3) containing integers between 0-7
+            Example: [2, 5, 1, 0, 3, 7, 4, 6, 2, 1, 0, 4, 7, 5, 3, 2, 6, 1]
+            codebook is the embedding table of shape [8, 4]
 
+            '''
+            indices, codebook = ctx.saved_tensors
+            embedding_size = codebook.size(1) # 4
+
+            # grad_output has shape [2, 3, 3, 4]
+            # grad_output_flatten reshapes it to [18, 4]
             grad_output_flatten = (grad_output.contiguous()
                                               .view(-1, embedding_size))
+            
+            # gradient of codebook : shape [8, 4], all zeros
             grad_codebook = torch.zeros_like(codebook)
+            # For each codebook vector, we accumulate gradients from all positions where that vector was used.
+            
+            '''
+            Given:
+            grad_codebook shape: [8, 4] (initialized with zeros)
+            indices shape: [18] with values like [2, 5, 1, 0, ...]
+            grad_output_flatten shape: [18, 4] with gradient values
+            The operation would do:
+
+            grad_codebook[2] += grad_output_flatten[0] (because indices[0] = 2)
+            grad_codebook[5] += grad_output_flatten[1] (because indices[1] = 5)
+            grad_codebook[1] += grad_output_flatten[2] (because indices[2] = 1)
+            ... and so on for all 18 positions
+            
+            '''
             grad_codebook.index_add_(0, indices, grad_output_flatten)
 
         return (grad_inputs, grad_codebook)

@@ -77,7 +77,8 @@ class VQEmbedding(nn.Module):
 
     def forward(self, z_e_x):
         z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous()
-        latents = vq(z_e_x_, self.embedding.weight)
+        latents = vq(z_e_x_, self.embedding.weight) #(input, codebook)
+        # return indices of the closest embedding from the codebook
         return latents
 
     def straight_through(self, z_e_x):
