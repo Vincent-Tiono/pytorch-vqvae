@@ -70,6 +70,8 @@ class VAE(nn.Module):
 class VQEmbedding(nn.Module):
     def __init__(self, K, D):
         super().__init__()
+         # lookup table, K: num of embeddings, D: embeddings dim
+         # when given indices, return the corresponding embedding
         self.embedding = nn.Embedding(K, D)
         self.embedding.weight.data.uniform_(-1./K, 1./K)
 
@@ -111,7 +113,7 @@ class VectorQuantizedVAE(nn.Module):
     def __init__(self, input_dim, dim, K=512):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(input_dim, dim, 4, 2, 1),
+            nn.Conv2d(input_dim, dim, 4, 2, 1), # (in dim, out dim, kernel, stride, padding)
             nn.BatchNorm2d(dim),
             nn.ReLU(True),
             nn.Conv2d(dim, dim, 4, 2, 1),
